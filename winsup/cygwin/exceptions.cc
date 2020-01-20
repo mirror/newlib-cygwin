@@ -460,6 +460,21 @@ cygwin_stackdump ()
   exc.dumpstack ();
 }
 
+extern "C" int
+cygwin_backtrace (void **array, int size)
+{
+    CONTEXT c;
+    c.ContextFlags = CONTEXT_FULL;
+    RtlCaptureContext (&c);
+
+    thestack.init ((PUINT_PTR) c._GR(bp), 0, &c);
+    int i;
+    for (i = 0; i < size && thestack++; i++)
+        array[i] = (void*)thestack.sf.AddrPC.Offset;
+
+  return i;
+}
+
 #define TIME_TO_WAIT_FOR_DEBUGGER 10000
 
 extern "C" int
