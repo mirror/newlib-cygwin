@@ -10,7 +10,6 @@ details. */
 #include "miscfuncs.h"
 #include <unistd.h>
 #include <stdlib.h>
-#include "glob.h"
 #include <ctype.h>
 #include <locale.h>
 #include <sys/param.h>
@@ -35,6 +34,7 @@ details. */
 #include "cygxdr.h"
 #include <fenv.h>
 #include "ntdll.h"
+#include "winf.h"
 
 #define MAX_AT_FILE_LEVEL 10
 
@@ -75,292 +75,6 @@ do_global_ctors (void (**in_pfunc)(), int force)
     ;
   while (--pfunc > in_pfunc)
     (*pfunc) ();
-}
-
-/*
- * Replaces @file in the command line with the contents of the file.
- * There may be multiple @file's in a single command line
- * A \@file is replaced with @file so that echo \@foo would print
- * @foo and not the contents of foo.
- */
-static bool __stdcall
-insert_file (char *name, char *&cmd)
-{
-  HANDLE f;
-  DWORD size;
-  tmp_pathbuf tp;
-
-  PWCHAR wname = tp.w_get ();
-  sys_mbstowcs (wname, NT_MAX_PATH, name + 1);
-  f = CreateFileW (wname,
-		   GENERIC_READ,		/* open for reading	*/
-		   FILE_SHARE_VALID_FLAGS,      /* share for reading	*/
-		   &sec_none_nih,		/* default security	*/
-		   OPEN_EXISTING,		/* existing file only	*/
-		   FILE_ATTRIBUTE_NORMAL,	/* normal file		*/
-		   NULL);			/* no attr. template	*/
-
-  if (f == INVALID_HANDLE_VALUE)
-    {
-      debug_printf ("couldn't open file '%s', %E", name);
-      return false;
-    }
-
-  /* This only supports files up to about 4 billion bytes in
-     size.  I am making the bold assumption that this is big
-     enough for this feature */
-  size = GetFileSize (f, NULL);
-  if (size == 0xFFFFFFFF)
-    {
-      CloseHandle (f);
-      debug_printf ("couldn't get file size for '%s', %E", name);
-      return false;
-    }
-
-  int new_size = strlen (cmd) + size + 2;
-  char *tmp = (char *) malloc (new_size);
-  if (!tmp)
-    {
-      CloseHandle (f);
-      debug_printf ("malloc failed, %E");
-      return false;
-    }
-
-  /* realloc passed as it should */
-  DWORD rf_read;
-  BOOL rf_result;
-  rf_result = ReadFile (f, tmp, size, &rf_read, NULL);
-  CloseHandle (f);
-  if (!rf_result || (rf_read != size))
-    {
-      free (tmp);
-      debug_printf ("ReadFile failed, %E");
-      return false;
-    }
-
-  tmp[size++] = ' ';
-  strcpy (tmp + size, cmd);
-  cmd = tmp;
-  return true;
-}
-
-static inline int
-isquote (char c)
-{
-  char ch = c;
-  return ch == '"' || ch == '\'';
-}
-
-/* Step over a run of characters delimited by quotes */
-static /*__inline*/ char *
-quoted (char *cmd, int winshell)
-{
-  char *p;
-  char quote = *cmd;
-
-  if (!winshell)
-    {
-      char *p;
-      strcpy (cmd, cmd + 1);
-      if (*(p = strchrnul (cmd, quote)))
-	strcpy (p, p + 1);
-      return p;
-    }
-
-  const char *s = quote == '\'' ? "'" : "\\\"";
-  /* This must have been run from a Windows shell, so preserve
-     quotes for globify to play with later. */
-  while (*cmd && *++cmd)
-    if ((p = strpbrk (cmd, s)) == NULL)
-      {
-	cmd = strchr (cmd, '\0');	// no closing quote
-	break;
-      }
-    else if (*p == '\\')
-      cmd = ++p;
-    else if (quote == '"' && p[1] == '"')
-      {
-	*p = '\\';
-	cmd = ++p;			// a quoted quote
-      }
-    else
-      {
-	cmd = p + 1;		// point to after end
-	break;
-      }
-  return cmd;
-}
-
-/* Perform a glob on word if it contains wildcard characters.
-   Also quote every character between quotes to force glob to
-   treat the characters literally. */
-
-/* Either X:[...] or \\server\[...] */
-#define is_dos_path(s) (isdrive(s) \
-			|| ((s)[0] == '\\' \
-			    && (s)[1] == '\\' \
-			    && isalpha ((s)[2]) \
-			    && strchr ((s) + 3, '\\')))
-
-static int __stdcall
-globify (char *word, char **&argv, int &argc, int &argvlen)
-{
-  if (*word != '~' && strpbrk (word, "?*[\"\'(){}") == NULL)
-    return 0;
-
-  int n = 0;
-  char *p, *s;
-  int dos_spec = is_dos_path (word);
-  if (!dos_spec && isquote (*word) && word[1] && word[2])
-    dos_spec = is_dos_path (word + 1);
-
-  /* We'll need more space if there are quoting characters in
-     word.  If that is the case, doubling the size of the
-     string should provide more than enough space. */
-  if (strpbrk (word, "'\""))
-    n = strlen (word);
-  char pattern[strlen (word) + ((dos_spec + 1) * n) + 1];
-
-  /* Fill pattern with characters from word, quoting any
-     characters found within quotes. */
-  for (p = pattern, s = word; *s != '\000'; s++, p++)
-    if (!isquote (*s))
-      {
-	if (dos_spec && *s == '\\')
-	  *p++ = '\\';
-	*p = *s;
-      }
-    else
-      {
-	char quote = *s;
-	while (*++s && *s != quote)
-	  {
-	    if (dos_spec || *s != '\\')
-	      /* nothing */;
-	    else if (s[1] == quote || s[1] == '\\')
-	      s++;
-	    *p++ = '\\';
-	    size_t cnt = isascii (*s) ? 1 : mbtowc (NULL, s, MB_CUR_MAX);
-	    if (cnt <= 1 || cnt == (size_t)-1)
-	      *p++ = *s;
-	    else
-	      {
-		--s;
-		while (cnt-- > 0)
-		  *p++ = *++s;
-	      }
-	  }
-	if (*s == quote)
-	  p--;
-	if (*s == '\0')
-	    break;
-      }
-
-  *p = '\0';
-
-  glob_t gl;
-  gl.gl_offs = 0;
-
-  /* Attempt to match the argument.  Return just word (minus quoting) if no match. */
-  if (glob (pattern, GLOB_TILDE | GLOB_NOCHECK | GLOB_BRACE | GLOB_QUOTE, NULL, &gl) || !gl.gl_pathc)
-    return 0;
-
-  /* Allocate enough space in argv for the matched filenames. */
-  n = argc;
-  if ((argc += gl.gl_pathc) > argvlen)
-    {
-      argvlen = argc + 10;
-      argv = (char **) realloc (argv, (1 + argvlen) * sizeof (argv[0]));
-    }
-
-  /* Copy the matched filenames to argv. */
-  char **gv = gl.gl_pathv;
-  char **av = argv + n;
-  while (*gv)
-    {
-      debug_printf ("argv[%d] = '%s'", n++, *gv);
-      *av++ = *gv++;
-    }
-
-  /* Clean up after glob. */
-  free (gl.gl_pathv);
-  return 1;
-}
-
-/* Build argv, argc from string passed from Windows.  */
-
-static void __stdcall
-build_argv (char *cmd, char **&argv, int &argc, int winshell)
-{
-  int argvlen = 0;
-  int nesting = 0;		// monitor "nesting" from insert_file
-
-  argc = 0;
-  argvlen = 0;
-  argv = NULL;
-
-  /* Scan command line until there is nothing left. */
-  while (*cmd)
-    {
-      /* Ignore spaces */
-      if (issep (*cmd))
-	{
-	  cmd++;
-	  continue;
-	}
-
-      /* Found the beginning of an argument. */
-      char *word = cmd;
-      char *sawquote = NULL;
-      while (*cmd)
-	{
-	  if (*cmd != '"' && (!winshell || *cmd != '\''))
-	    cmd++;		// Skip over this character
-	  else
-	    /* Skip over characters until the closing quote */
-	    {
-	      sawquote = cmd;
-	      /* Handle quoting.  Only strip off quotes if the parent is
-		 a Cygwin process, or if the word starts with a '@'.
-		 In this case, the insert_file function needs an unquoted
-		 DOS filename and globbing isn't performed anyway. */
-	      cmd = quoted (cmd, winshell && argc > 0 && *word != '@');
-	    }
-	  if (issep (*cmd))	// End of argument if space
-	    break;
-	}
-      if (*cmd)
-	*cmd++ = '\0';		// Terminate `word'
-
-      /* Possibly look for @file construction assuming that this isn't
-	 the very first argument and the @ wasn't quoted */
-      if (argc && sawquote != word && *word == '@')
-	{
-	  if (++nesting > MAX_AT_FILE_LEVEL)
-	    api_fatal ("Too many levels of nesting for %s", word);
-	  if (insert_file (word, cmd))
-	      continue;			// There's new stuff in cmd now
-	}
-
-      /* See if we need to allocate more space for argv */
-      if (argc >= argvlen)
-	{
-	  argvlen = argc + 10;
-	  argv = (char **) realloc (argv, (1 + argvlen) * sizeof (argv[0]));
-	}
-
-      /* Add word to argv file after (optional) wildcard expansion. */
-      if (!winshell || !argc || !globify (word, argv, argc, argvlen))
-	{
-	  debug_printf ("argv[%d] = '%s'", argc, word);
-	  argv[argc++] = word;
-	}
-    }
-
-  if (argv)
-    argv[argc] = NULL;
-
-  debug_printf ("argc %d", argc);
 }
 
 /* sanity and sync check */
@@ -948,8 +662,13 @@ dll_crt0_1 (void *)
 
       /* Scan the command line and build argv.  Expand wildcards if not
 	 called from another cygwin process. */
-      build_argv (line, __argv, __argc,
-		  NOTSTATE (myself, PID_CYGPARENT) && allow_glob);
+      __argc = cygwin_cmdline_parse (line, &__argv, NULL,
+		NOTSTATE (myself, PID_CYGPARENT) && allow_glob, MAX_AT_FILE_LEVEL);
+
+      if (__argc == -EMLINK)
+	api_fatal ("Too many levels of nesting for %s", line);
+      else if (__argc < 0)
+	api_fatal ("%s for parsing cmdline %s", strerror(-__argc), line);
 
       /* Convert argv[0] to posix rules if it's currently blatantly
 	 win32 style. */
@@ -1073,7 +792,7 @@ _dll_crt0 ()
 	  if (stackaddr)
 	    {
 	      /* Set stack pointer to new address.  Set frame pointer to
-	         stack pointer and subtract 32 bytes for shadow space. */
+		 stack pointer and subtract 32 bytes for shadow space. */
 	      __asm__ ("\n\
 		       movq %[ADDR], %%rsp \n\
 		       movq  %%rsp, %%rbp  \n\

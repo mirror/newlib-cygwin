@@ -73,7 +73,7 @@ class linebuf
   void add (const char *what) {add (what, strlen (what));}
   void prepend (const char *, int);
   void __reg2 finish (bool);
-  bool __reg3 fromargv(av&, const char *, bool);;
+  bool __reg3 fromargv(av&, const char *, bool, bool fq = false);;
   operator size_t () const { return ix + 1; }
   operator const char * () const { return buf; }
   operator wchar_t * ()
@@ -94,3 +94,5 @@ class linebuf
     return wbuf;
   }
 };
+
+extern "C" int cygwin_cmdline_parse (char *, char ***, char **, int, int);

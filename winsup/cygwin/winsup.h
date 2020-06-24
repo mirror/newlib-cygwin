@@ -135,9 +135,6 @@ extern int cygserver_running;
 
 #define set_api_fatal_return(n) do {extern int __api_fatal_exit_val; __api_fatal_exit_val = (n);} while (0)
 
-#undef issep
-#define issep(ch) (strchr (" \t\n\r", (ch)) != NULL)
-
 /* Every path beginning with / or \, as well as every path being X:
    or starting with X:/ or X:\ */
 #define isabspath_u(p) \
@@ -152,6 +149,10 @@ extern int cygserver_running;
 
 #define isabspath(p) \
   (isdirsep (*(p)) || (isalpha (*(p)) && (p)[1] == ':' && (!(p)[2] || isdirsep ((p)[2]))))
+
+/* Shortcut.  See also std::add_pointer. */
+#define malloc_type(n, type) ((type *) malloc ((n) * sizeof (type)))
+#define realloc_type(b, n, type) ((type *) realloc ((b), (n) * sizeof (type)))
 
 /******************** Initialization/Termination **********************/
 

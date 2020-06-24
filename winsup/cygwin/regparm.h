@@ -8,7 +8,7 @@ details. */
 
 #pragma once
 
-#if defined (__x86_64__) || defined (__CYGMAGIC__)
+#if defined (__x86_64__) || defined (__CYGMAGIC__) || !defined (__GNUC__)
 # define __reg1
 # define __reg2
 # define __reg3
