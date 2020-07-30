@@ -391,6 +391,7 @@ cygwin_posix_path_list_p NOSIGFE
 cygwin_set_impersonation_token SIGFE
 cygwin_split_path NOSIGFE
 cygwin_stackdump SIGFE
+cygwin_backtrace SIGFE
 cygwin_umount SIGFE
 cygwin_winpid_to_pid SIGFE
 daemon SIGFE
