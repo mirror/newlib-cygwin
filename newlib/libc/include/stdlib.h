@@ -342,7 +342,7 @@ void	__eprintf (const char *, const char *, unsigned int, const char *);
    _BSD_SOURCE, you get the BSD version; otherwise you get the GNU
    version.  We want that #undef qsort_r will still let you
    invoke the underlying function, but that requires gcc support. */
-#if __GNU_VISIBLE
+#if __GNU_VISIBLE || __ZEPHYR_VISIBLE
 void	qsort_r (void *__base, size_t __nmemb, size_t __size, int (*_compar)(const void *, const void *, void *), void *__thunk);
 #elif __BSD_VISIBLE
 # ifdef __GNUC__
