@@ -126,7 +126,7 @@ char 	*strndup (const char *, size_t) __malloc_like __result_use_check;
    invoke the underlying function, but that requires gcc support.  */
 #if __GNU_VISIBLE
 char	*strerror_r (int, char *, size_t);
-#elif __POSIX_VISIBLE >= 200112
+#elif __POSIX_VISIBLE >= 200112 || __ZEPHYR_VISIBLE
 # ifdef __GNUC__
 int	strerror_r (int, char *, size_t)
 #ifdef __ASMNAME
