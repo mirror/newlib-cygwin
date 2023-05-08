@@ -160,8 +160,10 @@ char *	mktemp (char *) __picolibc_deprecated("the use of `mktemp' is dangerous; 
 void	qsort (void *__base, size_t __nmemb, size_t __size, __compar_fn_t _compar);
 int	rand (void);
 void	*realloc(void *, size_t) __result_use_check __alloc_size(2) _NOTHROW;
-#if __BSD_VISIBLE
+#if __BSD_VISIBLE || __ZEPHYR_VISIBLE
 void	*reallocarray(void *, size_t, size_t) __result_use_check __alloc_size2(2, 3);
+#endif
+#if __BSD_VISIBLE
 void	*reallocf(void *, size_t) __result_use_check __alloc_size(2);
 #endif
 #if __BSD_VISIBLE || __XSI_VISIBLE >= 4
